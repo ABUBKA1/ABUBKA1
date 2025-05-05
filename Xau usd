@@ -1,0 +1,102 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import requests
+
+# 1. Karanta Real-Time Data (XAUUSD)
+API_KEY = "YOUR_API_KEY"  # Samu daga https://www.alphavantage.co/
+symbol = "XAUUSD"
+
+url = f"https://www.alphavantage.co/query?function=FX_DAILY&from_symbol=XAU&to_symbol=USD&apikey={API_KEY}&datatype=csv"
+data = pd.read_csv(url)
+data['timestamp'] = pd.to_datetime(data['timestamp'])
+data.set_index('timestamp', inplace=True)
+data = data.sort_index()
+
+# 2. MACD Calculation
+def calculate_macd(data, fast=12, slow=26, signal=9):
+    data["EMA_Fast"] = data["close"].ewm(span=fast, adjust=False).mean()
+    data["EMA_Slow"] = data["close"].ewm(span=slow, adjust=False).mean()
+    data["MACD"] = data["EMA_Fast"] - data["EMA_Slow"]
+    data["Signal"] = data["MACD"].ewm(span=signal, adjust=False).mean()
+    return data
+
+# 3. Bollinger Bands Calculation
+def calculate_bollinger_bands(data, window=20, std_dev=2):
+    data["SMA"] = data["close"].rolling(window=window).mean()
+    data["Upper"] = data["SMA"] + (data["close"].rolling(window=window).std() * std_dev)
+    data["Lower"] = data["SMA"] - (data["close"].rolling(window=window).std() * std_dev)
+    return data
+
+# 4. RSI Calculation
+def calculate_rsi(data, window=14):
+    delta = data["close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    data["RSI"] = 100 - (100 / (1 + rs))
+    return data
+
+# 5. Apply Indicators
+data = calculate_macd(data)
+data = calculate_bollinger_bands(data)
+data = calculate_rsi(data)
+
+# 6. Generate Signals (Haɗa MACD + Bollinger + RSI)
+data["Signal"] = np.where(
+    (data["MACD"] > data["Signal"]) & 
+    (data["close"] < data["Lower"]) & 
+    (data["RSI"] < 30), 
+    1,  # BUY
+    np.where(
+        (data["MACD"] < data["Signal"]) & 
+        (data["close"] > data["Upper"]) & 
+        (data["RSI"] > 70), 
+        -1,  # SELL
+        0    # HOLD
+    )
+)
+
+buy_signals = data[data["Signal"] == 1]
+sell_signals = data[data["Signal"] == -1]
+
+# 7. Plotting (Dukkan Indicators a Guda ɗaya)
+plt.figure(figsize=(14, 12))
+
+# Price + Bollinger Bands
+plt.subplot(3, 1, 1)
+plt.plot(data.index, data["close"], label="XAUUSD Price", color="gold", linewidth=2)
+plt.plot(data.index, data["SMA"], label="20 SMA", color="orange")
+plt.plot(data.index, data["Upper"], label="Upper Band", color="red", linestyle="--")
+plt.plot(data.index, data["Lower"], label="Lower Band", color="green", linestyle="--")
+plt.fill_between(data.index, data["Upper"], data["Lower"], color="gray", alpha=0.1)
+plt.scatter(buy_signals.index, buy_signals["close"], label="Buy", marker="^", color="green", s=100)
+plt.scatter(sell_signals.index, sell_signals["close"], label="Sell", marker="v", color="red", s=100)
+plt.title("XAUUSD - Haɗaɗɗiyar Indicators (MACD + Bollinger + RSI)")
+plt.legend()
+plt.grid()
+
+# MACD
+plt.subplot(3, 1, 2)
+plt.plot(data.index, data["MACD"], label="MACD", color="blue")
+plt.plot(data.index, data["Signal"], label="Signal Line", color="red")
+plt.axhline(0, color="black", linestyle="--", alpha=0.5)
+plt.title("MACD (12, 26, 9)")
+plt.legend()
+plt.grid()
+
+# RSI
+plt.subplot(3, 1, 3)
+plt.plot(data.index, data["RSI"], label="RSI (14)", color="purple")
+plt.axhline(70, color="red", linestyle="--", label="Overbought (70)")
+plt.axhline(30, color="green", linestyle="--", label="Oversold (30)")
+plt.title("Relative Strength Index (RSI)")
+plt.legend()
+plt.grid()
+
+plt.tight_layout()
+plt.show()
+
+# 8. Nuna Alamomi a Table
+print("\nAlamomin Siye/Saye na Ƙarshe:")
+print(data[["close", "Signal"]].tail(10))
